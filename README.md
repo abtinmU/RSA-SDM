@@ -1,2 +1,2 @@
-# RSA-WebPPL
-The term project of the course: Proabilistic Models of Cognition
+# RSA-SDM
+The term project of the course: Proabilistic Models of Cognition.
