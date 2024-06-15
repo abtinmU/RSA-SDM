@@ -1,2 +1,2 @@
 # RSA-SDM
-The term project of the course: Proabilistic Models of Cognition.
+This reposetory contains the full implementation of a probabilistic approach to three-person medical shared decision-making model.
