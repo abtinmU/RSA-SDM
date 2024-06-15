@@ -1,0 +1,89 @@
+// doctor's detailedness: deterministic transition
+
+
+var medicalUnderstanding = {
+  // Doctor's low level explanation is 100% understood by a medical expert listener but not by other listeners
+  "small detail" :[0,0,1],
+  // Doctor's mid level explanation makes is not understood only by someone of low medical knowledge
+  "medium detail":[0,1,1],
+  // Doctor's high level explanation makes sure all 3 types of listeners understand the situation
+  "high detail"  :[1,1,1]
+}
+
+var utteranceDetails = ["small detail", "medium detail", "high detail"]
+
+var understanding = function(utterancesDetail, state){
+  return medicalUnderstanding[utterancesDetail][state-1];
+};
+
+// The level of the patient's medical understanding
+var states1 = [1, 2, 3]
+
+// The level of the famiy member's medical understanding
+var states2 = [1, 2, 3]
+
+// The deterministic doctor: In the simplest form, we can define this model as a speaker 
+//version of a literal listener (a literal speaker). This speaker directly access the
+//defined probability matrix and deterministicly decides on the utterance. Depending on the
+//state(s) of the world. In this case, the input states show the medical understanding of
+//the patient and the family member.
+var deterministicDoctor = function(state1, state2) {
+  Infer({model: function(){
+    var utteranceDetail = uniformDraw(utteranceDetails);
+    // medical understanding of the patient:
+    var MUP = understanding(utteranceDetail, state1);
+    // medical understanding of the family member:
+    var MUF = understanding(utteranceDetail, state2);
+    // The doctor explains the surgery result to the listeners in a way that assures `both`
+    //listeners understand the expanation.
+    condition(MUP==1 && MUF==1);
+    return utteranceDetail;
+  }})
+};
+display("deterministic doctor:")
+display(viz(deterministicDoctor(1, 3)))
+
+
+
+
+// patient's decision: deterministic transition
+
+var treatmentEffects = {
+  "chemotherapy"       :[1,0,0,0],
+  "additional surgery" :[0,1,0,0],
+  "radiation therapy"  :[0,0,0,1],
+  "targeted therapies" :[0,0,1,0]
+} 
+
+// The state here is the result of surgery (the patient's current situation)
+var statesTXT = ["Complete Resection with Clean Margins",
+                 "Resection with Positive Margins",
+                 "Lymph Node Involvement",
+                 "Metastasis Detected"]
+var states = [1, 2, 3, 4]
+
+// The available treatment options (utterances)
+var treatments = ["chemotherapy", 
+                  "additional surgery", 
+                  "radiation therapy",
+                  "targeted therapies"]
+
+// A function to represent how much a patient benefits from the treatment depending on the 
+//surgery results. This acts as a type of transition function.
+var treatmentImportance = function(treatment, state){
+  return flip(treatmentEffects[treatment][state-1]);
+};
+
+// Patient Decision Model: A model that decide on the most effective treatment for the patient
+//based on the result of surgery
+var patientDecision = function(state) {
+  Infer({model: function(){
+    var treatment = uniformDraw(treatments);
+    var u = treatmentImportance(treatment, state);
+    condition(u);
+    return treatment;
+  }})
+};
+
+display('deterministic patient:')
+patientDecision(1)

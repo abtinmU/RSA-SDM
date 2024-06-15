@@ -1,0 +1,194 @@
+var medicalUnderstanding = {
+  1:[0.30,0.50,0.7],
+  2:[0.50,0.60,0.80],
+  3:[0.70,0.80,1.00]
+}
+// The amount of detail in the doctor's explanation
+var utteranceDetails = [1, 2, 3]
+
+// A function to represent how much a participant understands from the utterance(s):
+var understanding = function(utterancesDetail, state){
+  return flip(medicalUnderstanding[utterancesDetail][state-1]);
+};
+
+// The level of the patient's medical understanding
+var states1 = [1, 2, 3]
+
+// The level of the famiy member's medical understanding
+var states2 = [1, 2, 3]
+
+var states =   {
+  SR   : 'Complete Resection with Clean Margins',  // surgery result
+  PMU   : 1, // patient's medical understanding
+  FMU   : 3, // family's medical understanding
+}
+
+// In each utterance selection step, there is 1 possible choice depending on the patient's
+//situation after surgery (the selection of sentences would be deterministic, not probabilistic.)
+// As I am not profecient in the biology aspect, some of these might include some technical errors.
+// I will work further on these utterances and surgery results for the next stage of the project
+//and make sure the biological aspect is sound.
+var doctorUtterances = {
+  "Complete Resection with Clean Margins" : ["The surgical excision achieved clear margins.",
+                                             "There are no residual microscopic cancerous cells at the perimeter of the resected tissue. Available treatment options are chemotherapy (most beneficial), radiation therapy, and targeted therapies.",
+                                             "As a result, I see your situation optimistically. In you decision, note that chemotherapy causes nausea and vomiting, hair loss, fatigue, and infection. Radiation therapy results in skin problems, fatigue, hair loss, bladder issues. And targeted therapies might cause skin problems, blood pressure, fatigue, and kidney function problems later on."],
+  "Resection with Positive Margins" : ["The pathology report indicated positive margins.",
+                                       "It seems cancer cells are present at the edge of the excised tissue",
+                                       "Additional treatment will be required as cancer cells still remain in your body."],
+  "Lymph Node Involvement" : ["Histological analysis revealed metastatic cancer cells in the lymph nodes sampled during the surgery.",
+                              "This finding indicates that the cancer has spread beyond the primary tumor site to the lymphatic system.",
+                              "This means cancer cells might spread other parts of the body. A more aggressive treatment will be necessary"],
+  "Metastasis Detected" : ["Post-operative imaging and biopsies confirmed the presence of metastatic foci in distant organs.",
+                           "This means that the cancer has spread to other parts of the body, such as the liver or lungs.",
+                           "The treatment plan will likely include systemic therapies and we need to decide on those."],
+}
+
+var utterances = function(surgeryResult, detailLevel){
+  return doctorUtterances[surgeryResult].slice(0, utteranceDetails.indexOf(detailLevel)+1);
+};
+
+// A function that provides the utterance of the doctor depending on the result of the surgery.
+// This function is used after the doctor decides on the amount of detail is necessary in the
+//utterances.
+var fetchUtterances = function(surgeryResult, detailLevel){
+  var selectedUtterances  = utterances(surgeryResult, detailLevel)
+  return selectedUtterances .join(" ")
+}
+
+// Listeners: based on how detailed the utterances they receive are and based on their own level
+//of medical knoeledge, they understand the information differently
+var Patient = function(utteranceDetail) {
+  Infer({model: function(){
+    var state1 = uniformDraw(states1);
+    var u = understanding(utteranceDetail, state1);
+    condition(u);
+    return state1;
+  }})
+};
+
+// Ignorant doctor's model of the family member: this is a model of patient that assumes the 
+//patient makes similar inference from all levels of details. ndependent from his/her medical
+//knowledge.
+var Family = function(utteranceDetail) {
+  Infer({model: function(){
+    var state2 = uniformDraw(states2);
+    var u = understanding(utteranceDetail, state2);
+    condition(u);
+    return state2;
+  }})
+};
+
+var cost1 = function(utteranceDetail) {
+  return utteranceDetail === 1?
+    -0.08 : utteranceDetail === 2?
+    -0.01 : 0;
+};
+
+var alpha = 10; // the doctor's confidence
+var doctor_speaker1 = function(state1, state2, worldState, beta) {
+  Infer({model: function(){
+    var detailLevel = uniformDraw(utteranceDetails)
+    var L0_patient = Patient(detailLevel)
+    var L0_family = Family(detailLevel)
+    var utility = {
+      patient_epistemic: L0_patient.score(state1),
+      family_epistemic: L0_family.score(state2)
+    }
+    var speakerUtility = beta * utility.patient_epistemic + (1-beta) * utility.family_epistemic - cost1(detailLevel)
+    factor(alpha * speakerUtility)
+    return {detailLevel: detailLevel, completeUtterance: fetchUtterances(worldState, detailLevel)}
+  }})
+};
+
+var worldState = ["Complete Resection with Clean Margins",
+                 "Resection with Positive Margins",
+                 "Lymph Node Involvement",
+                 "Metastasis Detected"]
+
+var truncated_beta = function(a, b){
+  var sample = beta({'a':a, 'b':b})
+  return sample<=1? sample : truncated_beta(a, b)
+}
+
+var emotional_reaction = function(state1, inferredWorldState, detailLevel){
+  display(detailLevel)
+  if (inferredWorldState === "Complete Resection with Clean Margins"){
+    return detailLevel >= 4-state1?
+      truncated_beta(2, 15) : flip(0.9) ?
+      truncated_beta(30, 30) : truncated_beta(15, 3)
+  } else if(inferredWorldState === "Resection with Positive Margins") {
+    return detailLevel >= 4-state1? 
+      truncated_beta(30, 30) : flip(0.9) ?
+      truncated_beta(2, 15) : truncated_beta(15, 3)
+  } else if(inferredWorldState === "Lymph Node Involvement") {
+    return detailLevel >= 4-state1?
+      truncated_beta(15, 3) : flip(0.9) ?
+      truncated_beta(30, 30) : truncated_beta(2, 15)
+  } else if(inferredWorldState === "Metastasis Detected") {
+    return detailLevel >= 4-state1?
+      truncated_beta(15, 3) : flip(0.7) ?
+      truncated_beta(30, 30) : truncated_beta(2, 15)
+  }
+}
+
+// Patient and family member's inference about SR from Doctor's detaildeness
+var listener = cache(function(state1, state2, detailLevel) {
+  Infer({model: function(){
+    var state = uniformDraw(worldState);
+    var DS2 = marginalize(doctor_speaker1(state1, state2, state, 0.5), "detailLevel");
+    observe(DS2, detailLevel)
+    return state
+  }})
+});
+
+// Patient's and Family member's emotion
+var patient_emotion = cache(function(state1, detailLevel, SR) {
+  Infer({model: function(){
+    var stateP = uniformDraw(states1);
+    var inferred_worldState = listener(state1, stateP, detailLevel);
+    observe(inferred_worldState, SR);
+    var emotion = emotional_reaction(state1, SR, detailLevel);
+    return emotion
+  }})
+});
+
+var family_emotion = cache(function(state1, detailLevel, SR) {
+  Infer({model: function(){
+    var stateP = uniformDraw(states1);
+    var inferred_worldState = listener(state1, stateP, detailLevel);
+    observe(inferred_worldState, SR);
+    var emotion = emotional_reaction(state1, SR, detailLevel);
+    return emotion
+  }})
+});
+
+var states =   {
+  SR   : 'Complete Resection with Clean Margins',  // surgery result
+  PMU   : 1, // patient's medical understanding
+  FMU   : 3, // family's medical understanding
+}
+
+display("---------------  Doctor's Suggestion  --------------")
+display("A doctor who cares more for the patient")
+viz(marginalize(doctor_speaker1(states.PMU, states.FMU, states.SR, 0.9), "detailLevel"))
+//viz.table(marginalize(doctor_speaker1(states.PMU, states.FMU, states.SR, 0.9), "completeUtterance"))
+display("A doctor who cares more for the family member")
+viz(marginalize(doctor_speaker1(states.PMU, states.FMU, states.SR, 0.1), "detailLevel"))
+//viz.table(marginalize(doctor_speaker1(states.PMU, states.FMU, states.SR, 0.1), "completeUtterance"))
+display("A doctor who cares about both patient and family member equaly")
+viz(marginalize(doctor_speaker1(states.PMU, states.FMU, states.SR, 0.5), "detailLevel"))
+//viz.table(marginalize(doctor_speaker1(states.PMU, states.FMU, states.SR, 0.5), "completeUtterance"))
+display("Doctor when patient has low and family member has high medical understandng")
+viz(marginalize(doctor_speaker1(1, 3, states.SR, 0.5), "detailLevel"))
+display("Doctor when patient and family member both have high medical understandng")
+viz(marginalize(doctor_speaker1(3, 3, states.SR, 0.5), "detailLevel"))
+display("------------------------------------------------------")
+
+display("----------------- Patient's Emotion  -----------------")
+display("Patient's Emotion when patient has low medical understanding and doctor's detailedness is low")
+viz(patient_emotion(1, 1, states.SR))
+display("Patient's Emotion when patient has low medical understanding and doctor's detailedness is high")
+viz(patient_emotion(1, 3, states.SR))
+display("Patient's Emotion when patient has high medical understanding and doctor's detailedness is high")
+viz(patient_emotion(3, 3, states.SR))
+display("------------------------------------------------------")

@@ -1,0 +1,216 @@
+var treatmentEffects = {
+  "chemotherapy"       :[0.40,0.50,0.69,0.70],
+  "additional surgery" :[0.02,0.80,0.05,0.30],
+  "radiation therapy"  :[0.35,0.50,0.70,0.60],
+  "targeted therapies" :[0.20,0.20,0.20,0.70]
+} 
+
+// The state here is the result of surgery (the patient's current situation)
+var statesTXT = ["Complete Resection with Clean Margins",
+                 "Resection with Positive Margins",
+                 "Lymph Node Involvement",
+                 "Metastasis Detected"]
+var states = [1, 2, 3, 4]
+
+// The available treatment options (utterances)
+var treatments = ["chemotherapy", 
+                  "additional surgery", 
+                  "radiation therapy",
+                  "targeted therapies"]
+
+// A function to represent how much a patient benefits from the treatment depending on the 
+//surgery results:
+var treatmentImportance = function(treatment, state){
+  return flip(treatmentEffects[treatment][state-1]);
+};
+
+// A dictionary for side effects (this dictionary would not be used in this stage of the 
+//project):
+var treatmentSideEffects = {
+  "chemotherapy"   : ["nausea and vomiting", "hair loss", "fatigue", "infection"],
+  "additional surgery"   : ["infection", "bleeding", "anesthesia", "physical function"],
+  "radiation therapy"   : ["skin problems", "fatigue", "hair loss", "bladder issues"],
+  "targeted therapies"   : ["skin problems", "blood pressure", "fatigue", "kidney function"]
+}
+var sideEffectCost = function(sideEffect){
+  return sideEffect==="nausea and vomiting"?
+    0.4 :sideEffect==="hair loss"?
+    0.2 :sideEffect==="fatigue"?
+    0.15 :sideEffect==="infection"?
+    0.5 :sideEffect==="bleeding"?
+    0.5 :sideEffect==="anesthesia"?
+    0.1 :sideEffect==="physical function"?
+    0.6 :sideEffect==="skin problems"?
+    0.2 :sideEffect==="blood pressure"?
+    0.2 :sideEffect==="bladder issues"?
+    0.3 :sideEffect==="kidney function"?
+    0.6 : 0
+}
+
+// now, the cost of a treatment would be the summation of the cost of each side effect
+var treatmentCost = function(therapy) {
+  var sideEffects = treatmentSideEffects[therapy];
+  var totalCost = sum(map(sideEffectCost, sideEffects));
+  return totalCost;
+}
+
+// Patient Under Cure Model: A model that takes a treatment option and gives us the probability
+//that which patient gains the most advantage from this treatment
+var PatientCure = function(treatment) {
+  Infer({model: function(){
+    var state = uniformDraw(states);
+    var u = treatmentImportance(treatment, state);
+    condition(u);
+    return state;
+  }})
+};
+
+// alpha1 shows the confdence of the doctor
+var alpha1 = 25;
+
+// Doctor Speaker model: A model that suggests the treatment option that maximizes the
+//possible long term positive effects.
+var doctor_speaker2 = function(state) {
+  Infer({model: function(){
+    var treatment = uniformDraw(treatments)
+    var L0_patient_posterior = PatientCure(treatment)
+    var patient_epistemic = L0_patient_posterior.score(state)
+    var speakerUtility = patient_epistemic
+    factor(alpha1 * speakerUtility)
+    return treatment
+  }})
+};
+
+// Family Listener Model: The family member's inference of the on the doctor's utterance.
+var family_listener = function(treatment) {
+  Infer({model: function(){
+
+    var state = uniformDraw(states);
+    var DS2 = doctor_speaker2(state);
+    observe(DS2, treatment)
+
+    return state
+  }})
+};
+
+// Alpha2 shows the confidence level of the pragmatic family member
+var alpha2 = 2.5;
+// phi shows the propeortion of how much the family cares about their own opinion vs the 
+//doctor's suggestion. Here I assume the family cares more about the doctor's suggestion
+var phi = 0.5
+
+// The Family Speaker Model: The family member uses their understanding of the doctor's 
+//suggestions (from the family_listener1 model) and their own prior (of the patient's cure
+//- from the patientCure model) to suggest a treatment to the patient.
+var family_speaker_withoutSideEffect = function(state, phi) {
+  Infer({model: function(){
+    var treatment = uniformDraw(treatments)
+    var family_prior = family_listener(treatment)
+    var treatment = uniformDraw(treatments)
+    var doctor_suggestion = doctor_speaker2(state)
+    var utility = {
+      family_epi: family_prior.score(state),
+      doctor_epi: doctor_suggestion.score(treatment)
+    }
+    var speakerUtility = (1-phi) * utility.doctor_epi + phi * utility.family_epi 
+    factor(alpha2 * speakerUtility)
+    return treatment
+  }})
+};
+
+var family_speaker = function(state, phi) {
+  Infer({model: function(){
+    var treatment = uniformDraw(treatments)
+    var family_prior = family_listener(treatment)
+    var treatment = uniformDraw(treatments)
+    var doctor_suggestion = doctor_speaker2(state)
+    var utility = {
+      family_epi: family_prior.score(state),
+      doctor_epi: doctor_suggestion.score(treatment)
+    }
+    var speakerUtility = (1-phi) * utility.doctor_epi + phi * utility.family_epi  - treatmentCost(treatment)
+    factor(alpha2 * speakerUtility)
+    return treatment
+  }})
+};
+
+// The Patient's Listener Model: Now the patient thinks about the suggestions he just received
+//and tries to infer the state from them.
+var patient_listener = function(treatment) {
+  Infer({model: function(){
+
+    var state = uniformDraw(states);
+    var DS2 = doctor_speaker2(state);
+    var FS = family_speaker(state, 0.5);
+    observe(DS2, treatment)
+    observe(FS, treatment)
+    return state
+    
+  }})
+};
+
+var theta = 0.6
+
+var stressedSideEffectCost = function(sideEffect, stress){
+  return sideEffect==="nausea and vomiting"?
+    0.4 :sideEffect==="hair loss"?
+    0.2+5*stress :sideEffect==="fatigue"?
+    0.15 :sideEffect==="infection"?
+    0.5 :sideEffect==="bleeding"?
+    0.5 :sideEffect==="anesthesia"?
+    0.1 :sideEffect==="physical function"?
+    0.6 :sideEffect==="skin problems"?
+    0.2 :sideEffect==="blood pressure"?
+    0.2 :sideEffect==="bladder issues"?
+    0.3 :sideEffect==="kidney function"?
+    0.6 : 0
+}
+var stressedTreatmentCost = function(therapy, stress) {
+  var sideEffects = treatmentSideEffects[therapy];
+  var SideEffect_cost = function(therapy){stressedSideEffectCost(therapy, stress)}
+  var totalCost = sum(map(SideEffect_cost, sideEffects));
+  return totalCost;
+}
+var alpha3 = 0.8;
+var patient_decision = function(state, stress) {
+  Infer({model: function(){
+    var treatment = uniformDraw(treatments)
+    var patient_prior = PatientCure(treatment)
+    var suggestions = patient_listener(treatment)
+    var utility = {
+      patient_epi: patient_prior.score(state),
+      suggestions_epi: suggestions.score(state)
+    }
+    var speakerUtility = theta * utility.patient_epi + 
+        (1-theta) * utility.suggestions_epi - stressedTreatmentCost(treatment, stress)
+    factor(alpha3 * speakerUtility)
+    return treatment
+  }})
+};
+
+display("---------------  Treatments' Cost  -------------")
+display("chemotherapy cost is "+treatmentCost("chemotherapy"))
+display("additional surgery cost is "+treatmentCost("additional surgery"))
+display("radiation therapy cost is "+treatmentCost("radiation therapy"))
+display("targeted therapies cost is "+treatmentCost("targeted therapies"))
+display("------------------------------------------------")
+
+display("-------------  Doctor's Suggestion  ------------")
+display("Doctor's Suggestion for SR = Complete Resection with Clean Margins")
+viz(doctor_speaker2(1))
+display("Doctor's Suggestion for SR = Resection with Positive Margins")
+viz(doctor_speaker2(3))
+display("------------------------------------------------")
+
+display("---------  Family Member's Suggestion  ---------")
+display("Family Member's Suggestion with side effect cost for SR = Complete Resection with Clean Margins")
+viz(family_speaker(1, 0.5))
+display("Family Member's Suggestion without side effect cost for SR = Complete Resection with Clean Margins")
+viz(family_speaker_withoutSideEffect(1, 0.5))
+display("------------------------------------------------")
+
+display("-------------  Patient's Decision  -------------")
+viz(patient_decision(1, 0.1))
+viz(patient_decision(1, 0.5))
+viz(patient_decision(1, 0.9))
+display("------------------------------------------------")

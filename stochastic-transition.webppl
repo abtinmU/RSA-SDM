@@ -1,0 +1,76 @@
+// doctor's detailedness: stochastic transition
+
+var medicalUnderstanding = {
+  "small detail" :[1,0.85,0.75],
+  "medium detail":[0.8,0.6,0.4],
+  "high detail"  :[0.7,0.4,0.2]
+} 
+
+// The amunt of detail in the doctor's explanation
+var utteranceDetails = ["small detail", "medium detail", "high detail"]
+
+// The (semi)transition function now flips a coin instead of giving a direct probability
+var understanding = function(utterancesDetail, state){
+  return flip(medicalUnderstanding[utterancesDetail][state-1]);
+};
+var states1 = [1, 2, 3]
+var states2 = [1, 2, 3]
+
+// The stochastic doctor: Similar to the previous determinstic doctor model, stochastic doctor
+//is a basic literal speaker that doesn't try to infer anything about the listeners.
+var stochasticDoctor = function(state1, state2) {
+  Infer({model: function(){
+    var utteranceDetail = uniformDraw(utteranceDetails);
+    var MUP = understanding(utteranceDetail, state1);
+    var MUF = understanding(utteranceDetail, state2);
+    // The doctor explains the surgery result to the listeners in a way that assures `both`
+    //listeners understand the expanation.
+    condition(MUP&& MUF);
+    return utteranceDetail;
+  }})
+};
+display("stochastic doctor:")
+display(viz(stochasticDoctor(1, 3)))
+
+
+
+
+
+// patient's decision: stochastic transition
+
+var treatmentEffects = {
+  "chemotherapy"       :[0.40,0.50,0.70,0.60],
+  "additional surgery" :[0.02,0.80,0.05,0.05],
+  "radiation therapy"  :[0.30,0.50,0.70,0.70],
+  "targeted therapies" :[0.30,0.20,0.40,0.70]
+} 
+
+// The state here is the result of surgery (the patient's current situation)
+var statesTXT = ["Complete Resection with Clean Margins",
+                 "Resection with Positive Margins",
+                 "Lymph Node Involvement",
+                 "Metastasis Detected"]
+var states = [1, 2, 3, 4]
+
+// The available treatment options (utterances)
+var treatments = ["chemotherapy", 
+                  "additional surgery", 
+                  "radiation therapy",
+                  "targeted therapies"]
+
+var treatmentImportance = function(treatment, state){
+  return flip(treatmentEffects[treatment][state-1]);
+};
+
+// Patient Decision Model: A model that decide on the most effective treatment for the patient
+//based on the result of surgery
+var patientDecision = function(state) {
+  Infer({model: function(){
+    var treatment = uniformDraw(treatments);
+    var u = treatmentImportance(treatment, state);
+    condition(u);
+    return treatment;
+  }})
+};
+display('stochastic patient:')
+patientDecision(1)
