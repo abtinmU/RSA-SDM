@@ -1,2 +1,2 @@
 # RSA-SDM
-This reposetory contains the full implementation of a probabilistic model of three-person medical shared decision-making.
+This reposetory contains the full implementation of a probabilistic model for three-person medical shared decision-making.
